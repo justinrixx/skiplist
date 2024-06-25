@@ -1,6 +1,10 @@
 package skiplist
 
-import "bytes"
+import (
+	"bytes"
+	"fmt"
+	"math/rand"
+)
 
 // invariant assumptions:
 // - if a node exists in a higher level, it also exists in every lower level
@@ -11,7 +15,6 @@ type (
 		key   []byte
 		value []byte
 
-		// TODO does this need to be doubly linked?
 		next  *node
 		below *node
 	}
@@ -45,13 +48,13 @@ func (l *list) insert(k []byte, v []byte) {
 		return
 	}
 
-	// TODO use the middle return value
-	location, _, found := l.locate(k)
+	location, levels, found := l.locate(k)
 	if found {
 		location.value = v
 		return
 	}
 
+	var newNode *node
 	// nil location means we need to insert before the current head
 	if location == nil {
 		currFront := l.fronts[0]
@@ -63,14 +66,56 @@ func (l *list) insert(k []byte, v []byte) {
 		}
 		currFront.key = k
 		currFront.value = v
+
+		newNode = currFront
 	} else {
-		location.next = &node{
+		newNode = &node{
 			key:   k,
 			value: v,
 			next:  location.next,
 		}
+		location.next = newNode
 	}
-	// TODO bubble up
+
+	// add a new level as long as we get heads
+	i := len(levels) - 1
+	belowNode := newNode
+	flip := rand.Intn(2)
+	for flip == 0 {
+		n := &node{
+			key:   k,
+			below: belowNode,
+		}
+
+		// link into the existing list if appropriate
+		if i >= 0 {
+			prev := levels[i]
+			if prev != nil {
+				n.next = prev.next
+				prev.next = n
+			} else {
+				// levels is in reversed order from fronts. also levels does not include the
+				// 0th level.
+				//
+				// fronts: [0, 1, 2, 3, 4]
+				// levels: [4, 3, 2, 1]
+				//
+				// ex: level 4 is at levels[0] but sholud map to fronts[4]
+				// len(fronts)-i-1 = 5-0-1 = 4
+				//
+				// ex level 2 is at levels[2] but should map to fronts[2]
+				// len(fronts)-i-1 = 5-2-1 = 2
+				n.next = l.fronts[len(l.fronts)-i-1]
+			}
+		} else {
+			// level doesn't exist, create one
+			l.fronts = append(l.fronts, n)
+		}
+
+		belowNode = n
+		flip = rand.Intn(2)
+		i--
+	}
 }
 
 func (l *list) locate(k []byte) (*node, []*node, bool) {
@@ -78,13 +123,14 @@ func (l *list) locate(k []byte) (*node, []*node, bool) {
 	var levels []*node
 
 	// find where the element belongs, starting with the topmost
-	// list (greatest i)
+	// (sparsest) list
 	for i := len(l.fronts) - 1; i > 0; i-- {
 		if n == nil {
 			// are we able to travel right from this level?
 			if bytes.Compare(k, l.fronts[i].key) > 0 {
 				n = l.fronts[i]
 			} else {
+				levels = append(levels, nil)
 				continue
 			}
 		}
@@ -110,7 +156,7 @@ Loop:
 		switch bytes.Compare(k, n.key) {
 		case 0: // equal
 			return n, nil, true
-		case -1: // passed where it should be, doesn't exist
+		case -1: // we've passed where it should be, doesn't exist
 			break Loop
 		case 1:
 			prev = n
@@ -119,4 +165,16 @@ Loop:
 	}
 
 	return prev, levels, false
+}
+
+func (l *list) print() {
+	for i, front := range l.fronts {
+		fmt.Printf("\nlevel %d\n", i)
+		for front != nil {
+			fmt.Printf("%s ", string(front.key))
+
+			front = front.next
+		}
+	}
+	fmt.Println()
 }
